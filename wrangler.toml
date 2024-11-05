@@ -10,3 +10,13 @@ minify = true
 
 # Use the new Workers + Assets to host the static frontend files
 assets = { directory = ".worker-next/assets", binding = "ASSETS" }
+
+[[durable_objects.bindings]]
+name = "CURSOR_SESSIONS"
+class_name = "CursorSessions"
+script_name = "worker"
+
+[[services]]
+binding = "RPC_SERVICE"
+service = "worker"
+entrypoint = "SessionsRPC"

@@ -4,14 +4,21 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:worker": "npm run -w worker dev",
     "build": "next build",
+    "build:worker": "cloudflare",
     "start": "next start",
     "lint": "next lint",
     "deploy": "cloudflare && wrangler deploy",
     "preview": "cloudflare && wrangler dev",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv env.d.ts"
   },
+  "workspaces": [
+    ".",
+    "worker"
+  ],
   "dependencies": {
+    "nanoid": "^5.0.8",
     "next": "14.2.5",
     "react": "^18",
     "react-dom": "^18"
