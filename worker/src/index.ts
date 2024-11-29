@@ -23,8 +23,9 @@ export class CursorSessions extends DurableObject<Env> {
 	}
 
 	broadcast(message: WsMessage, self?: string) {
-		this.sessions.forEach((session, ws) => {
-			session.id !== self && ws.send(JSON.stringify(message));
+		this.ctx.getWebSockets().forEach((ws) => {
+			const { id } = ws.deserializeAttachment();
+			if (id !== self) ws.send(JSON.stringify(message));
 		});
 	}
 

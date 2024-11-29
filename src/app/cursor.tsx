@@ -1,36 +1,15 @@
 "use client";
 
-import { useEffect, useReducer, useRef, useState } from "react";
-import type { Session, WsMessage } from "../../worker/src/index";
-
-type MessageState = { in: string; out: string };
-type MessageAction = { type: "in" | "out"; message: string };
-function messageReducer(state: MessageState, action: MessageAction) {
-  switch (action.type) {
-    case "in":
-      return { ...state, in: action.message };
-    case "out":
-      return { ...state, out: action.message };
-    default:
-      return state;
-  }
-}
-
-function useHighlight(duration = 250) {
-  const timestampRef = useRef(0);
-  const [highlighted, setHighlighted] = useState(false);
-  function highlight() {
-    timestampRef.current = Date.now();
-    setHighlighted(true);
-    setTimeout(() => {
-      const now = Date.now();
-      if (now - timestampRef.current >= duration) {
-        setHighlighted(false);
-      }
-    }, duration);
-  }
-  return [highlighted, highlight] as const;
-}
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
+import type { Session, WsMessage } from "@worker/src/index";
+import { PerfectCursor } from "perfect-cursors";
 
 export function Cursors(props: { id: string }) {
   const [mounted, setMounted] = useState(false);
@@ -42,6 +21,8 @@ export function Cursors(props: { id: string }) {
   const [cursors, setCursors] = useState<Map<string, Session>>(new Map());
   const [highlightedIn, highlightIn] = useHighlight();
   const [highlightedOut, highlightOut] = useHighlight();
+  const lastSentTimestamp = useRef(0);
+  const sendInterval = 55;
 
   useEffect(() => {
     setMounted(true);
@@ -49,8 +30,9 @@ export function Cursors(props: { id: string }) {
 
   function startWebSocket() {
     const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const wsUrl = `${wsProtocol}://${process.env.NEXT_PUBLIC_WS_HOST}/ws?id=${props.id}`;
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(
+      `${wsProtocol}://${process.env.NEXT_PUBLIC_WS_HOST}/ws?id=${props.id}`,
+    );
     ws.onopen = () => {
       highlightOut();
       dispatchMessage({ type: "out", message: "get-cursors" });
@@ -64,36 +46,31 @@ export function Cursors(props: { id: string }) {
       switch (messageData.type) {
         case "quit":
           setCursors((prev) => {
-            const newCursors = new Map(prev);
-            newCursors.delete(messageData.id);
-            return newCursors;
+            const updated = new Map(prev);
+            updated.delete(messageData.id);
+            return updated;
           });
           break;
         case "join":
           setCursors((prev) => {
-            const newCursors = new Map(prev);
-            const session = newCursors.get(messageData.id);
-            if (!session) {
-              newCursors.set(messageData.id, {
-                id: messageData.id,
-                x: -1,
-                y: -1,
-              });
+            const updated = new Map(prev);
+            if (!updated.has(messageData.id)) {
+              updated.set(messageData.id, { id: messageData.id, x: -1, y: -1 });
             }
-            return newCursors;
+            return updated;
           });
           break;
         case "move":
           setCursors((prev) => {
-            const newCursors = new Map(prev);
-            const session = newCursors.get(messageData.id);
+            const updated = new Map(prev);
+            const session = updated.get(messageData.id);
             if (session) {
               session.x = messageData.x;
               session.y = messageData.y;
             } else {
-              newCursors.set(messageData.id, messageData);
+              updated.set(messageData.id, messageData);
             }
-            return newCursors;
+            return updated;
           });
           break;
         case "get-cursors-response":
@@ -111,18 +88,13 @@ export function Cursors(props: { id: string }) {
     return ws;
   }
 
-  const lastSentTimestamp = useRef(0);
-  const sendInterval = 20;
-
   useEffect(() => {
     const abortController = new AbortController();
     document.addEventListener(
       "mousemove",
       (ev) => {
-        const w = window.innerWidth,
-          h = window.innerHeight;
-        const x = ev.pageX / w,
-          y = ev.pageY / h;
+        const x = ev.pageX / window.innerWidth,
+          y = ev.pageY / window.innerHeight;
         const now = Date.now();
         if (
           now - lastSentTimestamp.current > sendInterval &&
@@ -140,11 +112,13 @@ export function Cursors(props: { id: string }) {
       },
     );
     return () => abortController.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     wsRef.current = startWebSocket();
     return () => wsRef.current?.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.id]);
 
   function sendMessage() {
@@ -193,17 +167,8 @@ export function Cursors(props: { id: string }) {
         <button
           className="border px-2 py-1 disabled:opacity-80"
           onClick={() => {
-            const readyState = wsRef.current?.readyState;
-            const timeout = readyState === WebSocket.CLOSED ? 0 : 1000;
-            if (
-              readyState === WebSocket.OPEN ||
-              readyState === WebSocket.CONNECTING
-            ) {
-              wsRef.current?.close();
-            }
-            setTimeout(() => {
-              wsRef.current = startWebSocket();
-            }, timeout);
+            wsRef.current?.close();
+            wsRef.current = startWebSocket();
           }}
         >
           ws reconnect
@@ -228,24 +193,31 @@ export function Cursors(props: { id: string }) {
   );
 }
 
-function getRandomHexColor() {
-  const randomColor = Math.floor(Math.random() * 16777215).toString(16);
-  return `#${randomColor.padStart(6, "0")}`;
-}
-
 function SvgCursor(props: { x: number; y: number }) {
-  const [color] = useState(getRandomHexColor());
-
+  const refSvg = useRef<SVGSVGElement>(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const point = [window.innerWidth * props.x, window.innerHeight * props.y];
+  const animateCursor = useCallback((point: number[]) => {
+    refSvg.current?.style.setProperty(
+      "transform",
+      `translate(${point[0]}px, ${point[1]}px)`,
+    );
+  }, []);
+  const onPointMove = usePerfectCursor(animateCursor);
+  useLayoutEffect(() => onPointMove(point), [onPointMove, point]);
+  const [randomColor] = useState(
+    `#${Math.floor(Math.random() * 16777215)
+      .toString(16)
+      .padStart(6, "0")}`,
+  );
   return (
     <svg
+      ref={refSvg}
       height="32"
       width="32"
       viewBox="0 0 32 32"
       xmlns="http://www.w3.org/2000/svg"
-      className={`absolute -top-[12px] -left-[12px] transition-transform duration-75 pointer-events-none ${props.x === -1 || props.y === -1 ? "hidden" : ""}`}
-      style={{
-        transform: `translate(${props.x * window.innerWidth}px, ${props.y * window.innerHeight}px)`,
-      }}
+      className={`absolute -top-[12px] -left-[12px] pointer-events-none ${props.x === -1 || props.y === -1 ? "hidden" : ""}`}
     >
       <defs>
         <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
@@ -263,13 +235,63 @@ function SvgCursor(props: { x: number; y: number }) {
         />
         <path
           d="M19.751 24.4155L17.907 25.1895L14.807 17.8155L16.648 17.04z"
-          fill={color}
+          fill={randomColor}
         />
         <path
           d="M13 10.814V22.002L15.969 19.136l.428-.139h4.768z"
-          fill={color}
+          fill={randomColor}
         />
       </g>
     </svg>
   );
+}
+
+function usePerfectCursor(cb: (point: number[]) => void, point?: number[]) {
+  const [pc] = useState(() => new PerfectCursor(cb));
+
+  useLayoutEffect(() => {
+    if (point) pc.addPoint(point);
+    return () => pc.dispose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pc]);
+
+  useLayoutEffect(() => {
+    PerfectCursor.MAX_INTERVAL = 58;
+  }, []);
+
+  const onPointChange = useCallback(
+    (point: number[]) => pc.addPoint(point),
+    [pc],
+  );
+
+  return onPointChange;
+}
+
+type MessageState = { in: string; out: string };
+type MessageAction = { type: "in" | "out"; message: string };
+function messageReducer(state: MessageState, action: MessageAction) {
+  switch (action.type) {
+    case "in":
+      return { ...state, in: action.message };
+    case "out":
+      return { ...state, out: action.message };
+    default:
+      return state;
+  }
+}
+
+function useHighlight(duration = 250) {
+  const timestampRef = useRef(0);
+  const [highlighted, setHighlighted] = useState(false);
+  function highlight() {
+    timestampRef.current = Date.now();
+    setHighlighted(true);
+    setTimeout(() => {
+      const now = Date.now();
+      if (now - timestampRef.current >= duration) {
+        setHighlighted(false);
+      }
+    }, duration);
+  }
+  return [highlighted, highlight] as const;
 }
