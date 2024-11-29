@@ -8,25 +8,21 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Session, WsMessage } from "@worker/src/index";
+import type { Session, WsMessage } from "../../worker/src/index";
 import { PerfectCursor } from "perfect-cursors";
 
+const INTERVAL = 55;
+
 export function Cursors(props: { id: string }) {
-  const [mounted, setMounted] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const [cursors, setCursors] = useState<Map<string, Session>>(new Map());
+  const lastSentTimestamp = useRef(0);
   const [messageState, dispatchMessage] = useReducer(messageReducer, {
     in: "",
     out: "",
   });
-  const [cursors, setCursors] = useState<Map<string, Session>>(new Map());
   const [highlightedIn, highlightIn] = useHighlight();
   const [highlightedOut, highlightOut] = useHighlight();
-  const lastSentTimestamp = useRef(0);
-  const sendInterval = 55;
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   function startWebSocket() {
     const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -97,7 +93,7 @@ export function Cursors(props: { id: string }) {
           y = ev.pageY / window.innerHeight;
         const now = Date.now();
         if (
-          now - lastSentTimestamp.current > sendInterval &&
+          now - lastSentTimestamp.current > INTERVAL &&
           wsRef.current?.readyState === WebSocket.OPEN
         ) {
           const message: WsMessage = { type: "move", id: props.id, x, y };
@@ -128,6 +124,10 @@ export function Cursors(props: { id: string }) {
       JSON.stringify({ type: "message", data: "Ping" } satisfies WsMessage),
     );
   }
+
+  const otherCursors = Array.from(cursors.values()).filter(
+    ({ id, x, y }) => id !== props.id && x !== -1 && y !== -1,
+  );
 
   return (
     <>
@@ -181,22 +181,22 @@ export function Cursors(props: { id: string }) {
         </button>
       </div>
       <div>
-        {mounted &&
-          Array.from(cursors.values()).map(
-            (session) =>
-              props.id !== session.id && (
-                <SvgCursor key={session.id} x={session.x} y={session.y} />
-              ),
-          )}
+        {otherCursors.map((session) => (
+          <SvgCursor
+            key={session.id}
+            point={[
+              session.x * window.innerWidth,
+              session.y * window.innerHeight,
+            ]}
+          />
+        ))}
       </div>
     </>
   );
 }
 
-function SvgCursor(props: { x: number; y: number }) {
+function SvgCursor({ point }: { point: number[] }) {
   const refSvg = useRef<SVGSVGElement>(null);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const point = [window.innerWidth * props.x, window.innerHeight * props.y];
   const animateCursor = useCallback((point: number[]) => {
     refSvg.current?.style.setProperty(
       "transform",
@@ -217,7 +217,7 @@ function SvgCursor(props: { x: number; y: number }) {
       width="32"
       viewBox="0 0 32 32"
       xmlns="http://www.w3.org/2000/svg"
-      className={`absolute -top-[12px] -left-[12px] pointer-events-none ${props.x === -1 || props.y === -1 ? "hidden" : ""}`}
+      className={"absolute -top-[12px] -left-[12px] pointer-events-none"}
     >
       <defs>
         <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">

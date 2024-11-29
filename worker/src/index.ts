@@ -29,6 +29,49 @@ export class CursorSessions extends DurableObject<Env> {
 		});
 	}
 
+	async webSocketMessage(ws: WebSocket, message: string) {
+		if (typeof message !== 'string') return;
+		const parsedMsg: WsMessage = JSON.parse(message);
+		const session = this.sessions.get(ws);
+		if (!session) return;
+
+		switch (parsedMsg.type) {
+			case 'move':
+				session.x = parsedMsg.x;
+				session.y = parsedMsg.y;
+				ws.serializeAttachment(session);
+				this.broadcast(parsedMsg, session.id);
+				break;
+
+			case 'get-cursors':
+				const sessions: Session[] = [];
+				this.sessions.forEach((session) => {
+					sessions.push(session);
+				});
+				const wsMessage: WsMessage = { type: 'get-cursors-response', sessions };
+				ws.send(JSON.stringify(wsMessage));
+				break;
+
+			case 'message':
+				this.broadcast(parsedMsg);
+				break;
+
+			default:
+				break;
+		}
+	}
+
+	async webSocketClose(ws: WebSocket) {
+		const id = this.sessions.get(ws)?.id;
+		id && this.broadcast({ type: 'quit', id });
+		this.sessions.delete(ws);
+		ws.close();
+	}
+
+	closeSessions() {
+		this.ctx.getWebSockets().forEach((ws) => ws.close());
+	}
+
 	async fetch(request: Request) {
 		const url = new URL(request.url);
 		const webSocketPair = new WebSocketPair();
@@ -50,60 +93,13 @@ export class CursorSessions extends DurableObject<Env> {
 			webSocket: client,
 		});
 	}
-
-	async webSocketMessage(ws: WebSocket, message: string) {
-		if (typeof message !== 'string') return;
-		let parsedMsg: WsMessage = JSON.parse(message);
-
-		const session = this.sessions.get(ws);
-		if (!session) return;
-
-		switch (parsedMsg.type) {
-			case 'move':
-				session.x = parsedMsg.x;
-				session.y = parsedMsg.y;
-				ws.serializeAttachment(session);
-				this.broadcast(parsedMsg, session.id);
-				break;
-			case 'get-cursors':
-				const sessions: Session[] = [];
-				this.sessions.forEach((session) => {
-					sessions.push(session);
-				});
-				const wsMessage: WsMessage = { type: 'get-cursors-response', sessions };
-				ws.send(JSON.stringify(wsMessage));
-				break;
-
-			case 'message':
-				parsedMsg.data = `${parsedMsg.data} to ${this.sessions.size} clients`;
-				this.broadcast(parsedMsg);
-				break;
-			default:
-				break;
-		}
-	}
-
-	async webSocketClose(ws: WebSocket, code: number) {
-		const id = this.sessions.get(ws)?.id;
-		ws.close();
-		this.sessions.delete(ws);
-		id && this.broadcast({ type: 'quit', id });
-	}
-
-	closeSessions() {
-		this.ctx.getWebSockets().forEach((ws) => ws.close());
-	}
 }
 
-/**
- * We need this because Durable Object RPC isn't yet supported in
- * multiple `wrangler dev` sessions.
- * On production, Durable Object RPC isn't an issue.
- */
 export class SessionsRPC extends WorkerEntrypoint<Env> {
 	async closeSessions() {
 		const id = this.env.CURSOR_SESSIONS.idFromName('globalRoom');
 		const stub = this.env.CURSOR_SESSIONS.get(id);
+		// Invoking Durable Object RPC method. Same `wrangler dev` session.
 		await stub.closeSessions();
 	}
 }
@@ -113,7 +109,9 @@ export default {
 		if (request.url.match('/ws')) {
 			const upgradeHeader = request.headers.get('Upgrade');
 			if (!upgradeHeader || upgradeHeader !== 'websocket') {
-				return new Response('Durable Object expected Upgrade: websocket', { status: 426 });
+				return new Response('Durable Object expected Upgrade: websocket', {
+					status: 426,
+				});
 			}
 			const id = env.CURSOR_SESSIONS.idFromName('globalRoom');
 			const stub = env.CURSOR_SESSIONS.get(id);
