@@ -27,7 +27,8 @@ export function Cursors(props: { id: string }) {
   function startWebSocket() {
     const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(
-      `${wsProtocol}://${process.env.NEXT_PUBLIC_WS_HOST}/ws?id=${props.id}`,
+      // `${wsProtocol}://${process.env.NEXT_PUBLIC_WS_HOST}/ws?id=${props.id}`,
+      `${wsProtocol}://worker.plgingras88.workers.dev/ws?id=${props.id}`,
     );
     ws.onopen = () => {
       highlightOut();
@@ -94,7 +95,8 @@ export function Cursors(props: { id: string }) {
         const now = Date.now();
         if (
           now - lastSentTimestamp.current > INTERVAL &&
-          wsRef.current?.readyState === WebSocket.OPEN
+          wsRef.current?.readyState === WebSocket.OPEN &&
+          cursors.size >= 2
         ) {
           const message: WsMessage = { type: "move", id: props.id, x, y };
           wsRef.current.send(JSON.stringify(message));
@@ -109,7 +111,7 @@ export function Cursors(props: { id: string }) {
     );
     return () => abortController.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [cursors]);
 
   useEffect(() => {
     wsRef.current = startWebSocket();
