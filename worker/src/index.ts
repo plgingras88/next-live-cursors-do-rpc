@@ -63,7 +63,11 @@ export class CursorSessions extends DurableObject<Env> {
 
 	async webSocketClose(ws: WebSocket) {
 		const id = this.sessions.get(ws)?.id;
-		id && this.broadcast({ type: 'quit', id });
+		
+		if (id) {
+			this.broadcast({ type: 'quit', id });
+		}
+
 		this.sessions.delete(ws);
 		ws.close();
 	}
@@ -73,10 +77,11 @@ export class CursorSessions extends DurableObject<Env> {
 	}
 
 	async fetch(request: Request) {
-		const url = new URL(request.url);
 		const webSocketPair = new WebSocketPair();
 		const [client, server] = Object.values(webSocketPair);
 		this.ctx.acceptWebSocket(server);
+		
+		const url = new URL(request.url);
 		const id = url.searchParams.get('id');
 		if (!id) {
 			return new Response('Missing id', { status: 400 });
@@ -93,6 +98,17 @@ export class CursorSessions extends DurableObject<Env> {
 			webSocket: client,
 		});
 	}
+
+	createProject() {
+		this.ctx.storage.sql.exec(`
+			CREATE TABLE IF NOT EXISTS 
+				sessions (
+					id TEXT PRIMARY KEY, 
+					x INTEGER, 
+					y INTEGER
+				)`
+			);
+	}
 }
 
 export class SessionsRPC extends WorkerEntrypoint<Env> {
@@ -108,15 +124,19 @@ export default {
 	async fetch(request, env, ctx) {
 		if (request.url.match('/ws')) {
 			const upgradeHeader = request.headers.get('Upgrade');
+
 			if (!upgradeHeader || upgradeHeader !== 'websocket') {
 				return new Response('Durable Object expected Upgrade: websocket', {
 					status: 426,
 				});
 			}
+
 			const id = env.CURSOR_SESSIONS.idFromName('globalRoom');
 			const stub = env.CURSOR_SESSIONS.get(id);
+			
 			return stub.fetch(request);
 		}
+		
 		return new Response(null, {
 			status: 400,
 			statusText: 'Bad Request',

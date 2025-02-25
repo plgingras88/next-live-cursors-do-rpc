@@ -27,8 +27,8 @@ export function Cursors(props: { id: string }) {
   function startWebSocket() {
     const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(
-      // `${wsProtocol}://${process.env.NEXT_PUBLIC_WS_HOST}/ws?id=${props.id}`,
-      `${wsProtocol}://worker.plgingras88.workers.dev/ws?id=${props.id}`,
+      `${wsProtocol}://${process.env.NEXT_PUBLIC_WS_HOST}/ws?id=${props.id}`,
+      // `${wsProtocol}://worker.plgingras88.workers.dev/ws?id=${props.id}`,
     );
     ws.onopen = () => {
       highlightOut();
@@ -131,6 +131,8 @@ export function Cursors(props: { id: string }) {
     ({ id, x, y }) => id !== props.id && x !== -1 && y !== -1,
   );
 
+  console.log({otherCursors});
+
   return (
     <>
       <div className="flex border">
@@ -205,6 +207,7 @@ function SvgCursor({ point }: { point: number[] }) {
       `translate(${point[0]}px, ${point[1]}px)`,
     );
   }, []);
+  console.log({point});
   const onPointMove = usePerfectCursor(animateCursor);
   useLayoutEffect(() => onPointMove(point), [onPointMove, point]);
   const [randomColor] = useState(
